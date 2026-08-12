@@ -1,54 +1,44 @@
-version: '3.8'
-
 services:
-  # Main application service
+
   app:
     build:
       context: .
       dockerfile: Dockerfile
+
+    container_name: docx-pdf-converter
+
     ports:
       - "80:80"
+
     volumes:
-      # Optional: persist uploaded/processed files
-      - ./data:/app/backend/data
-      - ./logs:/app/backend/logs
+      - ./data/uploads:/app/backend/uploads
+      - ./data/outputs:/app/backend/outputs
+      - ./data/temp:/app/backend/temp
+
     environment:
-      - PYTHONUNBUFFERED=1
-      - LIBREOFFICE_PATH=/usr/bin/libreoffice
+      PYTHONUNBUFFERED: "1"
+      LIBREOFFICE_PATH: "/usr/bin/libreoffice"
+
     restart: unless-stopped
+
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost/health"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "--spider",
+          "http://localhost/health"
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
 
-  # Development service with hot reload
-  dev:
-    build:
-      context: .
-      dockerfile: Dockerfile.dev
-    ports:
-      - "3000:3000"  # Frontend dev server
-      - "8000:8000"  # Backend API
-    volumes:
-      - ./frontend:/app/frontend
-      - ./backend:/app/backend
-      - /app/frontend/node_modules
-    environment:
-      - NODE_ENV=development
-      - PYTHONUNBUFFERED=1
-      - LIBREOFFICE_PATH=/usr/bin/libreoffice
-    command: >
-      sh -c "cd /app/backend && uvicorn main:app --host 0.0.0.0 --port 8000 --reload &
-             cd /app/frontend && npm run dev -- --host 0.0.0.0 --port 3000"
-    profiles:
-      - dev
+    networks:
+      - docx-network
 
-volumes:
-  data:
-  logs:
 
 networks:
-  default:
-    name: docx-pdf-converter-network
+  docx-network:
+    driver: bridge
