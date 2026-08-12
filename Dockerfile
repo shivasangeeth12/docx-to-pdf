@@ -1,61 +1,142 @@
-# Multi-stage build for DOCX to PDF Converter
-# Stage 1: Backend with Python and LibreOffice
-FROM python:3.11-slim as backend
+# ============================================================
+# Stage 1 - Build frontend
+# ============================================================
 
-# Install system dependencies for LibreOffice and file processing
-RUN apt-get update && apt-get install -y \
+FROM node:20-bookworm-slim AS frontend-builder
+
+WORKDIR /app/frontend
+
+COPY frontend/package*.json ./
+
+RUN npm ci
+
+COPY frontend/ .
+
+RUN npm run build
+
+
+# ============================================================
+# Stage 2 - Production
+# ============================================================
+
+FROM python:3.11-slim-bookworm AS production
+
+WORKDIR /app
+
+# ============================================================
+# Install system dependencies
+# ============================================================
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    nginx \
     libreoffice \
     libreoffice-writer \
     poppler-utils \
     ghostscript \
     libmagic1 \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app/backend
 
-COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# ============================================================
+# Python dependencies
+# ============================================================
 
-COPY backend/ .
+COPY backend/requirements.txt /app/requirements.txt
 
-EXPOSE 8000
+RUN pip install \
+    --no-cache-dir \
+    -r /app/requirements.txt
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 
-# Stage 2: Frontend build
-FROM node:20-alpine as frontend-builder
+# ============================================================
+# Backend
+# ============================================================
 
-WORKDIR /app/frontend
+COPY backend/ /app/backend/
 
-COPY frontend/package*.json ./
-RUN npm ci
 
-COPY frontend/ .
-RUN npm run build
+# ============================================================
+# Frontend
+# ============================================================
 
-# Stage 3: Production with nginx
-FROM nginx:alpine as production
+COPY --from=frontend-builder \
+    /app/frontend/dist \
+    /usr/share/nginx/html
 
-# Install Python and dependencies for backend
-RUN apk add --no-cache python3 py3-pip libreoffice libreoffice-writer poppler-utils ghostscript libmagic
 
-# Copy backend from backend stage
-COPY --from=backend /app/backend /app/backend
-COPY --from=backend /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=backend /usr/local/bin/uvicorn /usr/local/bin/uvicorn
+# ============================================================
+# Nginx
+# ============================================================
 
-# Copy frontend build
-COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
+COPY nginx.conf \
+    /etc/nginx/conf.d/default.conf
 
-# Copy nginx config
-COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Create startup script
-RUN echo '#!/bin/sh\n\
+# Remove default nginx config if necessary
+RUN rm -f /etc/nginx/sites-enabled/default
+
+
+# ============================================================
+# Application directories
+# ============================================================
+
+RUN mkdir -p \
+    /app/backend/uploads \
+    /app/backend/outputs \
+    /app/backend/temp
+
+
+# ============================================================
+# Environment
+# ============================================================
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV LIBREOFFICE_PATH=/usr/bin/libreoffice
+
+
+# ============================================================
+# Startup script
+# ============================================================
+
+RUN printf '#!/bin/sh\n\
+set -e\n\
+\n\
 cd /app/backend\n\
+\n\
 uvicorn main:app --host 0.0.0.0 --port 8000 &\n\
-nginx -g "daemon off;"\n' > /start.sh && chmod +x /start.sh
+\n\
+exec nginx -g "daemon off;"\n' > /start.sh \
+    && chmod +x /start.sh
+
+
+# ============================================================
+# Port
+# ============================================================
 
 EXPOSE 80
+
+
+# ============================================================
+# Health check
+# ============================================================
+
+HEALTHCHECK \
+    --interval=30s \
+    --timeout=10s \
+    --start-period=40s \
+    --retries=3 \
+    CMD wget \
+    --no-verbose \
+    --tries=1 \
+    --spider \
+    http://localhost/health \
+    || exit 1
+
+
+# ============================================================
+# Start
+# ============================================================
 
 CMD ["/start.sh"]
