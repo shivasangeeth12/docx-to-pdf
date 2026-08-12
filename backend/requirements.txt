@@ -1,0 +1,13 @@
+fastapi==0.109.0
+uvicorn==0.27.0
+python-multipart==0.0.6
+python-docx==1.1.0
+Pillow==10.2.0
+PyMuPDF==1.23.26
+python-magic==0.4.27
+aiofiles==23.2.1
+python-magic-bin==0.4.14
+libreoffice-convert==1.0
+python-dotenv==1.0.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
